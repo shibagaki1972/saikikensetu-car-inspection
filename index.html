@@ -28,7 +28,7 @@
         .del-btn { 
             position: absolute; top: -4px; right: -4px; 
             background: #ef4444; color: white; 
-            width: 22px; height: 22px; border-radius: 50%; 
+            width: 24px; height: 22px; border-radius: 50%; 
             font-size: 14px; font-weight: bold; line-height: 22px; 
             text-align: center; border: 1.5px solid white; z-index: 10;
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
@@ -65,7 +65,7 @@
             <div id="captureArea" class="space-y-4"></div>
 
             <!-- 送信・リセットボタン -->
-            <div class="mt-8 space-y-4">
+            <div class="mt-8 space-y-4 pb-10">
                 <button id="submitBtn" onclick="handleReport()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-5 rounded-2xl shadow-xl flex flex-col items-center justify-center transition-all active:scale-95">
                     <span id="btnText" class="text-lg">🚀 報告を自動送信</span>
                     <span class="text-[10px] opacity-70 mt-1 font-normal text-white">SharePoint ＆ Teamsへ一括アップロード</span>
@@ -75,9 +75,10 @@
         </div>
     </main>
 
-    <!-- アップロード中オーバーレイ -->
-    <div id="loadingOverlay" class="fixed inset-0 bg-white/90 z-[100] hidden flex flex-col items-center justify-center text-blue-600 font-bold">
-        <div class="loader mb-4"></div>送信中... そのままお待ちください
+    <!-- 送信中オーバーレイ -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-white/90 z-[100] hidden flex flex-col items-center justify-center text-blue-600 font-bold text-center p-6">
+        <div class="loader mb-4"></div>送信中... そのままお待ちください<br>
+        <span class="text-xs text-slate-400 font-normal mt-2">※写真枚数が多いと数分かかる場合があります</span>
     </div>
 
     <!-- 隠しカメラ入力 -->
@@ -94,7 +95,7 @@
             { id: 'right', label: '右側' }, { id: 'left', label: '左側' } 
         ];
         let db;
-        const DB_NAME = "V-Inspection-PWA-v1";
+        const DB_NAME = "V-Inspection-Final-JST";
         const STORE_NAME = "photos";
         let vehicleMaster = [];
 
@@ -123,7 +124,7 @@
                 const saved = localStorage.getItem('car_master_pwa');
                 if(saved) {
                     vehicleMaster = JSON.parse(saved);
-                    status.innerText = "● ローカルモード";
+                    status.innerText = "● ローカル保存分を表示";
                 } else {
                     status.innerText = "● リスト読込失敗";
                 }
@@ -154,7 +155,7 @@
                 });
                 transaction.oncomplete = () => { loadPreviews(); e.target.value = ''; };
             } catch (err) {
-                alert("メモリ不足のため処理できませんでした。一度アイコンを押し直して再起動してください。");
+                alert("メモリ不足のため処理できませんでした。一度アプリを再起動してください。");
             }
         };
 
@@ -204,7 +205,7 @@
             reader.readAsDataURL(blob);
         });
 
-        // 4. PDF作成 ＆ Power Automate送信
+        // 文字を画像化（PDFの文字化け対策）
         function textToImg(txt) {
             const c = document.createElement('canvas'); c.width = 400; c.height = 50;
             const ctx = c.getContext('2d');
@@ -214,6 +215,7 @@
             return c.toDataURL('image/jpeg', 0.8);
         }
 
+        // 4. 送信処理（日付計算を日本時間に修正）
         async function handleReport() {
             const vehicleId = document.getElementById('vehicleSelect').value;
             if (!vehicleId) return alert('車両を選択してください');
@@ -228,11 +230,15 @@
                     return alert('写真がありません'); 
                 }
 
+                // 日付の計算 (日本時間の年月日を確実に取得)
+                const now = new Date();
+                const prefix = now.getFullYear() + 
+                               String(now.getMonth() + 1).padStart(2, '0') + 
+                               String(now.getDate()).padStart(2, '0');
+                const folderName = `${prefix}_${vehicleId}`;
+
                 const { jsPDF } = window.jspdf;
                 const pdf = new jsPDF('p', 'mm', 'a4');
-                const now = new Date();
-                const prefix = now.toISOString().slice(0,10).replace(/-/g,'');
-                const folderName = `${prefix}_${vehicleId}`;
                 const fileList = [];
 
                 pdf.addImage(textToImg(`車番: ${vehicleId}  点検日: ${now.toLocaleDateString()}`), 'JPEG', 10, 10, 120, 15);
@@ -243,6 +249,8 @@
                     if (y > 250) { pdf.addPage(); y = 25; }
                     pdf.addImage(textToImg(categories.find(c => c.id === p.category).label), 'JPEG', x, y-6, 30, 5);
                     pdf.addImage(url, 'JPEG', x, y, 45, 35, undefined, 'FAST');
+                    
+                    // 写真ファイルをリストに追加
                     fileList.push({ 
                         name: `${p.category}_${Math.random().toString(36).substr(2,4)}.jpg`, 
                         content: await blobToBase64(p.original) 
@@ -264,7 +272,7 @@
                         body: JSON.stringify({ vehicleId, folderName, files: fileList })
                     });
                     if (response.ok) {
-                        alert('報告完了しました！');
+                        alert('送信完了しました！');
                         clearDatabase();
                     } else { throw new Error(); }
                 } catch (err) {
@@ -275,7 +283,7 @@
             };
         }
 
-        // 初期化 UI生成
+        // UI生成
         function initCaptureUI() {
             document.getElementById('captureArea').innerHTML = categories.map(cat => `
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
@@ -289,8 +297,7 @@
             `).join('');
         }
         function triggerCamera(id) { currentTarget = id; document.getElementById('cameraInput').click(); }
-        function showTab(id) { document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active')); document.getElementById('tab-' + id).classList.add('active'); }
-        function clearDatabase() { if(confirm('撮影データをリセットしますか？')) { indexedDB.deleteDatabase(DB_NAME); location.reload(); } }
+        function clearDatabase() { if(confirm('撮影データをすべてリセットしますか？')) { indexedDB.deleteDatabase(DB_NAME); location.reload(); } }
         
         window.onload = () => {
             document.getElementById('displayDate').innerText = "点検日: " + new Date().toLocaleDateString();
