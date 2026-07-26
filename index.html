@@ -3,16 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>車両点検報告システム</title>
+    <title>車両点検報告システム Pro</title>
+    
+    <!-- PWA用設定 -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/744/744465.png">
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
+
+    <!-- ライブラリ -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    
     <style>
         body { -webkit-touch-callout: none; -webkit-user-select: none; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         .photo-container { position: relative; }
-        .del-btn { position: absolute; top: -4px; right: -4px; background: #ef4444; color: white; width: 20px; height: 20px; border-radius: 50%; font-size: 14px; font-weight: bold; line-height: 20px; text-align: center; border: 1.5px solid white; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; display: inline-block; }
+        .del-btn { 
+            position: absolute; top: -4px; right: -4px; 
+            background: #ef4444; color: white; 
+            width: 22px; height: 22px; border-radius: 50%; 
+            font-size: 14px; font-weight: bold; line-height: 22px; 
+            text-align: center; border: 1.5px solid white; z-index: 10;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .loader { 
+            border: 4px solid #f3f3f3; border-top: 4px solid #3498db; 
+            border-radius: 50%; width: 30px; height: 30px; 
+            animation: spin 1s linear infinite; 
+        }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
@@ -20,120 +45,117 @@
 
     <!-- ヘッダー -->
     <header class="bg-blue-900 text-white p-4 sticky top-0 z-50 flex justify-between items-center shadow-lg">
-        <h1 class="font-bold tracking-tight">車両点検報告</h1>
-        <button onclick="showTab('settings')" class="text-xs bg-blue-800 px-3 py-1 rounded-full border border-blue-700">設定</button>
+        <h1 class="font-bold tracking-tight text-lg">車両点検報告</h1>
+        <div id="syncStatus" class="text-[10px] bg-blue-800 px-2 py-1 rounded-full border border-blue-700">読込中...</div>
     </header>
 
     <main class="max-w-md mx-auto p-4">
         
-        <!-- 【撮影メイン画面】 -->
         <div id="tab-main" class="tab-content active">
+            <!-- 車両選択セクション -->
             <div class="bg-white p-4 rounded-2xl shadow-sm mb-6 border border-blue-100">
                 <div class="flex justify-between items-center mb-1">
-                    <label class="text-xs font-bold text-blue-600">車両を選択</label>
-                    <span id="syncStatus" class="text-[10px] text-slate-400"></span>
+                    <label class="text-xs font-bold text-blue-600">車両を選択してください</label>
                 </div>
                 <select id="vehicleSelect" class="w-full p-3 border-0 bg-slate-50 rounded-xl text-lg font-bold focus:ring-2 focus:ring-blue-400 outline-none"></select>
                 <p id="displayDate" class="text-right text-[10px] text-slate-400 mt-2 font-mono"></p>
             </div>
 
-            <!-- カテゴリ撮影エリア -->
+            <!-- 撮影エリア -->
             <div id="captureArea" class="space-y-4"></div>
 
-            <div class="mt-8 space-y-3">
+            <!-- 送信・リセットボタン -->
+            <div class="mt-8 space-y-4">
                 <button id="submitBtn" onclick="handleReport()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-5 rounded-2xl shadow-xl flex flex-col items-center justify-center transition-all active:scale-95">
-                    <span id="btnText" class="text-lg">📤 報告書 ＆ 全写真を送信</span>
-                    <span class="text-[10px] opacity-70 mt-1">送信先に「新しいチャネル」を選択してください</span>
+                    <span id="btnText" class="text-lg">🚀 報告を自動送信</span>
+                    <span class="text-[10px] opacity-70 mt-1 font-normal text-white">SharePoint ＆ Teamsへ一括アップロード</span>
                 </button>
-                <button onclick="clearDatabase()" class="w-full py-3 text-xs text-slate-400">撮影データをリセット（点検完了後）</button>
-            </div>
-        </div>
-
-        <!-- 【設定画面】 -->
-        <div id="tab-settings" class="tab-content">
-            <div class="bg-white p-6 rounded-2xl shadow-sm space-y-6">
-                <div>
-                    <h2 class="font-bold text-blue-900 border-b pb-2 mb-4 text-sm">管理設定</h2>
-                    
-                    <!-- チャネルURL設定 -->
-                    <div class="mb-6 space-y-2">
-                        <label class="block text-xs font-bold text-blue-600">チャネル「ファイル」タブのURL</label>
-                        <textarea id="teamsUrlInput" class="w-full p-2 border rounded-lg text-[10px] bg-slate-50" rows="3" placeholder="Teamsのファイルタブで『リンクをコピー』したURLをここに貼り付けてください"></textarea>
-                        <button onclick="saveTeamsUrl()" class="w-full bg-slate-800 text-white py-2 rounded-lg text-xs font-bold">リンクを保存</button>
-                    </div>
-
-                    <div class="space-y-4">
-                        <h3 class="text-xs font-bold text-slate-500">車番リスト（自動更新）</h3>
-                        <div id="masterList" class="border rounded-xl max-h-40 overflow-y-auto divide-y bg-slate-50 text-sm mb-4"></div>
-                        <div class="flex gap-2">
-                            <input type="text" id="manualInput" class="flex-1 border p-2 rounded-lg text-sm" placeholder="手動追加用">
-                            <button onclick="addVehicleManual()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">追加</button>
-                        </div>
-                    </div>
-                </div>
-                <button onclick="showTab('main')" class="w-full py-4 bg-slate-100 rounded-xl font-bold">撮影に戻る</button>
-                <button onclick="location.reload()" class="w-full py-2 text-[10px] text-slate-400">アプリを再起動</button>
+                <button onclick="clearDatabase()" class="w-full py-3 text-xs text-slate-400 font-medium">撮影データをリセット</button>
             </div>
         </div>
     </main>
 
+    <!-- アップロード中オーバーレイ -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-white/90 z-[100] hidden flex flex-col items-center justify-center text-blue-600 font-bold">
+        <div class="loader mb-4"></div>送信中... そのままお待ちください
+    </div>
+
+    <!-- 隠しカメラ入力 -->
     <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden">
 
     <script>
-        const categories = [
-            { id: 'front', label: '前側' }, { id: 'back', label: '後側' },
-            { id: 'right', label: '右側' }, { id: 'left', label: '左側' }
+        // ==========================================
+        // 【管理者設定】Webhook URL をここに貼り付けてください
+        // ==========================================
+        const WEBHOOK_URL = "https://default298a4aade6de48e7a574b2d8da59b7.b6.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/23/workflows/2cb3907693b34a0684fc1c52a32ffd01/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=e2LGT5OJ37nXWdrYO6GghieN1tKviO9CqT7nNkVPWDo";
+        
+        const categories = [ 
+            { id: 'front', label: '前側' }, { id: 'back', label: '後側' }, 
+            { id: 'right', label: '右側' }, { id: 'left', label: '左側' } 
         ];
         let db;
-        const DB_NAME = "V-Inspection-vFinal";
+        const DB_NAME = "V-Inspection-PWA-v1";
         const STORE_NAME = "photos";
-        let vehicleMaster = JSON.parse(localStorage.getItem('car_master_v3') || "[]");
-        let teamsUrl = localStorage.getItem('teams_url_final') || "";
+        let vehicleMaster = [];
 
-        // 1. DB (IndexedDB)
+        // 1. データベース (IndexedDB) の初期化
         const dbReq = indexedDB.open(DB_NAME, 1);
         dbReq.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
         dbReq.onsuccess = (e) => { db = e.target.result; loadPreviews(); };
 
-        // 2. 自動更新
+        // 2. 車番リストの自動読み込み
         async function fetchLatestMaster() {
             const status = document.getElementById('syncStatus');
-            status.innerHTML = '<span class="loader"></span> 同期中';
             try {
-                const res = await fetch('cars.csv', { cache: "no-cache" });
+                const res = await fetch('cars.csv?t=' + Date.now());
                 if (res.ok) {
                     const text = await res.text();
                     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l && l !== "車番");
                     if (lines.length > 0) {
                         vehicleMaster = lines;
-                        localStorage.setItem('car_master_v3', JSON.stringify(vehicleMaster));
-                        status.innerText = "● 最新";
+                        status.innerText = "● 車番更新完了";
+                        renderVehicleDropdown();
+                        return;
                     }
                 }
-            } catch (e) { status.innerText = "● ローカル"; }
-            refreshVehicleList();
+                throw new Error();
+            } catch (e) {
+                const saved = localStorage.getItem('car_master_pwa');
+                if(saved) {
+                    vehicleMaster = JSON.parse(saved);
+                    status.innerText = "● ローカルモード";
+                } else {
+                    status.innerText = "● リスト読込失敗";
+                }
+                renderVehicleDropdown();
+            }
         }
 
-        function refreshVehicleList() {
-            document.getElementById('vehicleSelect').innerHTML = vehicleMaster.map(v => `<option value="${v}">${v}</option>`).join('');
-            document.getElementById('masterList').innerHTML = vehicleMaster.map((v, i) => `<div class="p-2 flex justify-between bg-white"><span>${v}</span><button onclick="deleteVehicle(${i})" class="text-red-400">×</button></div>`).join('');
+        function renderVehicleDropdown() {
+            const select = document.getElementById('vehicleSelect');
+            select.innerHTML = vehicleMaster.map(v => `<option value="${v}">${v}</option>`).join('');
+            localStorage.setItem('car_master_pwa', JSON.stringify(vehicleMaster));
         }
 
-        function addVehicleManual() { const v = document.getElementById('manualInput').value.trim(); if(v){ vehicleMaster.push(v); refreshVehicleList(); } }
-        function deleteVehicle(i) { vehicleMaster.splice(i, 1); refreshVehicleList(); }
-        function saveTeamsUrl() { teamsUrl = document.getElementById('teamsUrlInput').value.trim(); localStorage.setItem('teams_url_final', teamsUrl); alert('保存しました'); }
-
-        // 3. 撮影 (メモリ節約)
+        // 3. 撮影 ＆ メモリ節約リサイズ処理
         let currentTarget = '';
         document.getElementById('cameraInput').onchange = async (e) => {
             const file = e.target.files[0];
             if (!file) return;
-            const resized = await getResizedData(file);
-            const transaction = db.transaction([STORE_NAME], "readwrite");
-            transaction.objectStore(STORE_NAME).add({
-                category: currentTarget, original: file, pdfVersion: resized.blob, thumb: resized.thumb
-            });
-            transaction.oncomplete = () => { loadPreviews(); e.target.value = ''; };
+
+            try {
+                const resized = await getResizedData(file);
+                const transaction = db.transaction([STORE_NAME], "readwrite");
+                transaction.objectStore(STORE_NAME).add({
+                    category: currentTarget,
+                    original: file,
+                    pdfVersion: resized.blob,
+                    thumb: resized.thumb
+                });
+                transaction.oncomplete = () => { loadPreviews(); e.target.value = ''; };
+            } catch (err) {
+                alert("メモリ不足のため処理できませんでした。一度アイコンを押し直して再起動してください。");
+            }
         };
 
         async function getResizedData(file) {
@@ -156,22 +178,18 @@
             });
         }
 
-        // 4. 個別削除
         function deletePhoto(id) {
-            const transaction = db.transaction([STORE_NAME], "readwrite");
-            transaction.objectStore(STORE_NAME).delete(id);
-            transaction.oncomplete = () => loadPreviews();
+            db.transaction([STORE_NAME], "readwrite").objectStore(STORE_NAME).delete(id).onsuccess = () => loadPreviews();
         }
 
         function loadPreviews() {
-            const transaction = db.transaction([STORE_NAME], "readonly");
-            transaction.objectStore(STORE_NAME).getAll().onsuccess = (e) => {
+            db.transaction([STORE_NAME], "readonly").objectStore(STORE_NAME).getAll().onsuccess = (e) => {
                 const all = e.target.result;
                 categories.forEach(cat => {
                     const filtered = all.filter(p => p.category === cat.id);
                     document.getElementById(`preview-${cat.id}`).innerHTML = filtered.map(p => `
                         <div class="photo-container">
-                            <img src="${p.thumb}" class="w-full h-14 object-cover rounded-lg border shadow-sm">
+                            <img src="${p.thumb}" class="w-full h-14 object-cover rounded-lg border border-slate-100 shadow-sm">
                             <div class="del-btn" onclick="deletePhoto(${p.id})">×</div>
                         </div>
                     `).join('');
@@ -180,57 +198,84 @@
             };
         }
 
-        // 5. 報告書 ＆ 送信
+        const blobToBase64 = blob => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.readAsDataURL(blob);
+        });
+
+        // 4. PDF作成 ＆ Power Automate送信
         function textToImg(txt) {
             const c = document.createElement('canvas'); c.width = 400; c.height = 50;
-            const ctx = c.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,400,50);
-            ctx.fillStyle = '#000000'; ctx.font = 'bold 24px sans-serif'; ctx.fillText(txt, 0, 35);
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,400,50);
+            ctx.fillStyle = '#000000'; ctx.font = 'bold 24px sans-serif';
+            ctx.fillText(txt, 0, 35);
             return c.toDataURL('image/jpeg', 0.8);
         }
 
         async function handleReport() {
             const vehicleId = document.getElementById('vehicleSelect').value;
             if (!vehicleId) return alert('車両を選択してください');
-            const btn = document.getElementById('submitBtn');
-            const btnText = document.getElementById('btnText');
-            btn.disabled = true; btnText.innerText = "作成中...";
+            if (WEBHOOK_URL.includes("ここに")) return alert('管理者設定：Webhook URLが未設定です');
+
+            document.getElementById('loadingOverlay').classList.remove('hidden');
 
             db.transaction([STORE_NAME], "readonly").objectStore(STORE_NAME).getAll().onsuccess = async (e) => {
                 const all = e.target.result;
-                if (all.length === 0) { alert('写真がありません'); btn.disabled = false; btnText.innerText = "報告書 ＆ 写真を送信"; return; }
+                if (all.length === 0) { 
+                    document.getElementById('loadingOverlay').classList.add('hidden'); 
+                    return alert('写真がありません'); 
+                }
 
                 const { jsPDF } = window.jspdf;
                 const pdf = new jsPDF('p', 'mm', 'a4');
-                const filesToSend = [];
-                const prefix = new Date().toISOString().slice(0,10).replace(/-/g,'');
+                const now = new Date();
+                const prefix = now.toISOString().slice(0,10).replace(/-/g,'');
+                const folderName = `${prefix}_${vehicleId}`;
+                const fileList = [];
 
-                pdf.addImage(textToImg(`車番: ${vehicleId}  点検日: ${new Date().toLocaleDateString()}`), 'JPEG', 10, 10, 120, 15);
+                pdf.addImage(textToImg(`車番: ${vehicleId}  点検日: ${now.toLocaleDateString()}`), 'JPEG', 10, 10, 120, 15);
                 let x = 10, y = 35;
                 
-                all.forEach((p, i) => {
+                for(let p of all) {
                     const url = URL.createObjectURL(p.pdfVersion);
                     if (y > 250) { pdf.addPage(); y = 25; }
                     pdf.addImage(textToImg(categories.find(c => c.id === p.category).label), 'JPEG', x, y-6, 30, 5);
                     pdf.addImage(url, 'JPEG', x, y, 45, 35, undefined, 'FAST');
-                    filesToSend.push(new File([p.original], `${p.category}_${i+1}.jpg`, {type: "image/jpeg"}));
+                    fileList.push({ 
+                        name: `${p.category}_${Math.random().toString(36).substr(2,4)}.jpg`, 
+                        content: await blobToBase64(p.original) 
+                    });
                     URL.revokeObjectURL(url);
                     x += 47; if (x > 180) { x = 10; y += 42; }
+                }
+
+                // PDFを最後に追加
+                fileList.push({ 
+                    name: `Report_${folderName}.pdf`, 
+                    content: await blobToBase64(pdf.output('blob')) 
                 });
 
-                const pdfFile = new File([pdf.output('blob')], `点検報告_${prefix}_${vehicleId}.pdf`, {type: 'application/pdf'});
-                filesToSend.unshift(pdfFile);
-
-                let shareText = `【車両点検報告】\n車番: ${vehicleId}\n点検日: ${new Date().toLocaleDateString()}`;
-                if (teamsUrl) shareText += `\n\n▼元データ保存先（Teamsファイル）\n${teamsUrl}`;
-
-                if (navigator.canShare && navigator.canShare({ files: filesToSend })) {
-                    try { await navigator.share({ files: filesToSend, title: '車両点検報告', text: shareText }); } catch (e) {}
-                } else { pdf.save(`Report_${prefix}_${vehicleId}.pdf`); }
-                btn.disabled = false; btnText.innerText = "📤 報告書 ＆ 全写真を送信";
+                try {
+                    const response = await fetch(WEBHOOK_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ vehicleId, folderName, files: fileList })
+                    });
+                    if (response.ok) {
+                        alert('報告完了しました！');
+                        clearDatabase();
+                    } else { throw new Error(); }
+                } catch (err) {
+                    alert('送信に失敗しました。電波の良い場所で再度お試しください。');
+                } finally {
+                    document.getElementById('loadingOverlay').classList.add('hidden');
+                }
             };
         }
 
-        // その他
+        // 初期化 UI生成
         function initCaptureUI() {
             document.getElementById('captureArea').innerHTML = categories.map(cat => `
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
@@ -239,18 +284,18 @@
                         <span id="count-${cat.id}" class="text-[10px] bg-slate-100 px-2 py-1 rounded text-slate-500 font-bold">0枚</span>
                     </div>
                     <div id="preview-${cat.id}" class="grid grid-cols-4 gap-2 mb-3"></div>
-                    <button onclick="triggerCamera('${cat.id}')" class="w-full bg-blue-600 text-white py-3 rounded-xl text-xs font-bold">撮影 / 追加</button>
+                    <button onclick="triggerCamera('${cat.id}')" class="w-full bg-blue-500 text-white py-3 rounded-xl text-xs font-bold active:bg-blue-600 transition-colors shadow-sm">撮影 / 追加</button>
                 </div>
             `).join('');
         }
         function triggerCamera(id) { currentTarget = id; document.getElementById('cameraInput').click(); }
         function showTab(id) { document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active')); document.getElementById('tab-' + id).classList.add('active'); }
-        function clearDatabase() { if(confirm('全データをリセットしますか？')) { indexedDB.deleteDatabase(DB_NAME); location.reload(); } }
-
+        function clearDatabase() { if(confirm('撮影データをリセットしますか？')) { indexedDB.deleteDatabase(DB_NAME); location.reload(); } }
+        
         window.onload = () => {
             document.getElementById('displayDate').innerText = "点検日: " + new Date().toLocaleDateString();
-            document.getElementById('teamsUrlInput').value = teamsUrl;
-            refreshVehicleList(); initCaptureUI(); fetchLatestMaster();
+            initCaptureUI();
+            fetchLatestMaster();
         };
     </script>
 </body>
