@@ -140,32 +140,58 @@
 
         // 3. 撮影 ＆ メモリ節約リサイズ処理
         let currentTarget = '';
-        document.getElementById('cameraInput').onchange = async (e) => {
+        document.getElementById('cameraInput').onchange = (e) => {
             const file = e.target.files[0];
+            const target = currentTarget;
+            e.target.value = '';
             if (!file) return;
 
-            try {
-                const resized = await getResizedData(file);
-                const transaction = db.transaction([STORE_NAME], "readwrite");
-                transaction.objectStore(STORE_NAME).add({
-                    category: currentTarget,
-                    original: file,
-                    pdfVersion: resized.blob,
-                    thumb: resized.thumb
-                });
-                transaction.oncomplete = () => { loadPreviews(); e.target.value = ''; };
-            } catch (err) {
-                alert("メモリ不足のため処理できませんでした。一度アプリを再起動してください。");
-            }
+            // 前の写真の処理が終わってから次を処理する（同時デコードによるメモリ圧迫を防止）
+            processingChain = processingChain.then(async () => {
+                try {
+                    const resized = await getResizedData(file);
+                    await new Promise((resolve, reject) => {
+                        const transaction = db.transaction([STORE_NAME], "readwrite");
+                        transaction.objectStore(STORE_NAME).add({
+                            category: target,
+                            original: file,
+                            pdfVersion: resized.blob,
+                            thumb: resized.thumb
+                        });
+                        transaction.oncomplete = resolve;
+                        transaction.onerror = () => reject(transaction.error);
+                    });
+                    loadPreviews();
+                } catch (err) {
+                    console.error(err);
+                    alert("写真の処理に失敗しました。お手数ですが、もう一度この面を撮影してください。");
+                }
+            });
         };
 
+        // 撮影処理は必ず順番に1件ずつ実行し、重複デコードでメモリを圧迫しないようにする
+        let processingChain = Promise.resolve();
+
         async function getResizedData(file) {
-            const bitmap = await createImageBitmap(file);
-            const canvas = document.createElement('canvas');
             const MAX = 1024;
+            let bitmap;
+            try {
+                // デコードと同時に縮小することで、フル解像度(数千万画素)を
+                // 一度もメモリ上に展開しない。これが撮影中に落ちる主因への対策。
+                bitmap = await createImageBitmap(file, {
+                    resizeWidth: MAX,
+                    resizeQuality: 'medium'
+                });
+            } catch (e) {
+                // resizeWidth未対応の古い環境向けフォールバック（フル解像度デコードになる）
+                bitmap = await createImageBitmap(file);
+            }
+            const canvas = document.createElement('canvas');
             let w = bitmap.width, h = bitmap.height;
-            const scale = MAX / Math.max(w, h);
-            if (scale < 1) { w *= scale; h *= scale; }
+            if (Math.max(w, h) > MAX) {
+                const scale = MAX / Math.max(w, h);
+                w *= scale; h *= scale;
+            }
             canvas.width = w; canvas.height = h;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(bitmap, 0, 0, w, h);
@@ -215,6 +241,51 @@
             return c.toDataURL('image/jpeg', 0.8);
         }
 
+        function blobToImage(blob) {
+            return new Promise((resolve, reject) => {
+                const url = URL.createObjectURL(blob);
+                const img = new Image();
+                img.onload = () => { resolve(img); URL.revokeObjectURL(url); };
+                img.onerror = reject;
+                img.src = url;
+            });
+        }
+
+        // Teamsチャネル上にそのままプレビュー表示させるためのPNG版レポート画像を作成
+        // （PDFはSharePoint保管用、こちらはTeams表示専用。日本語はcanvasのfillTextで直接描画できるため文字化けの心配がない）
+        async function buildReportImage(all, vehicleId, dateStr) {
+            const cols = 4, cellW = 230, cellH = 190, gap = 16, pad = 24, titleH = 60;
+            const rows = Math.max(1, Math.ceil(all.length / cols));
+            const canvas = document.createElement('canvas');
+            canvas.width = pad * 2 + cols * cellW + (cols - 1) * gap;
+            canvas.height = titleH + pad + rows * (cellH + gap);
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#111827';
+            ctx.font = 'bold 30px sans-serif';
+            ctx.fillText(`車番: ${vehicleId}　点検日: ${dateStr}`, pad, 42);
+
+            for (let i = 0; i < all.length; i++) {
+                const item = all[i];
+                const col = i % cols, row = Math.floor(i / cols);
+                const x = pad + col * (cellW + gap);
+                const y = titleH + pad + row * (cellH + gap);
+                const label = (categories.find(c => c.id === item.category) || {}).label || item.category;
+                ctx.fillStyle = '#374151';
+                ctx.font = 'bold 18px sans-serif';
+                ctx.fillText(label, x, y + 16);
+                try {
+                    const img = await blobToImage(item.pdfVersion);
+                    const areaW = cellW, areaH = cellH - 26;
+                    const scale = Math.min(areaW / img.width, areaH / img.height);
+                    const dw = img.width * scale, dh = img.height * scale;
+                    ctx.drawImage(img, x + (areaW - dw) / 2, y + 26 + (areaH - dh) / 2, dw, dh);
+                } catch (e) { /* 1枚失敗しても他の写真の描画は続ける */ }
+            }
+            return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        }
+
         // 4. 送信処理（日付計算を日本時間に修正）
         async function handleReport() {
             const vehicleId = document.getElementById('vehicleSelect').value;
@@ -250,19 +321,27 @@
                     pdf.addImage(textToImg(categories.find(c => c.id === p.category).label), 'JPEG', x, y-6, 30, 5);
                     pdf.addImage(url, 'JPEG', x, y, 45, 35, undefined, 'FAST');
                     
-                    // 写真ファイルをリストに追加
+                    // 写真ファイルをリストに追加（ファイル名だけで車両・面・日付が分かるようにする）
+                    const sideLabel = categories.find(c => c.id === p.category).label;
                     fileList.push({ 
-                        name: `${p.category}_${Math.random().toString(36).substr(2,4)}.jpg`, 
+                        name: `${folderName}_${sideLabel}_${Math.random().toString(36).substr(2,4)}.jpg`, 
                         content: await blobToBase64(p.original) 
                     });
                     URL.revokeObjectURL(url);
                     x += 47; if (x > 180) { x = 10; y += 42; }
                 }
 
-                // PDFを最後に追加
+                // PDFを追加（SharePoint保管・印刷用）
                 fileList.push({ 
                     name: `Report_${folderName}.pdf`, 
                     content: await blobToBase64(pdf.output('blob')) 
+                });
+
+                // Teamsチャネルに直接プレビュー表示させるためのPNG版を追加
+                const reportImageBlob = await buildReportImage(all, vehicleId, now.toLocaleDateString());
+                fileList.push({
+                    name: `Report_${folderName}.png`,
+                    content: await blobToBase64(reportImageBlob)
                 });
 
                 try {
